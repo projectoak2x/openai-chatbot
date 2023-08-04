@@ -101,19 +101,43 @@ class ChatGptStoreController extends Controller
                 ]);
             }else if($response->choices[0]->message->functionCall->name=='web_search'){
                 Log::info("Searching the web");
-                $apiKey = 'AIzaSyCNKAVmTCelLTeAxPGq_ShbIGfdv6WRaV4';
-                $cseID = '82a52554294294369';
                 $query = $jsonData->query;
-                $url = "https://www.googleapis.com/customsearch/v1?key=$apiKey&cx=$cseID&start=1&num=5&q=" .urlencode($query);
-    
-                $s_response = file_get_contents($url);
-                $concat_results = "";
+
+                $curl = curl_init();
+
+                curl_setopt_array($curl, array(
+                  CURLOPT_URL => 'https://google.serper.dev/search',
+                  CURLOPT_RETURNTRANSFER => true,
+                  CURLOPT_ENCODING => '',
+                  CURLOPT_MAXREDIRS => 10,
+                  CURLOPT_TIMEOUT => 0,
+                  CURLOPT_FOLLOWLOCATION => true,
+                  CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
+                  CURLOPT_CUSTOMREQUEST => 'POST',
+                  CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
+                  CURLOPT_HTTPHEADER => array(
+                    'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
+                    'Content-Type: application/json'
+                  ),
+                ));
+                
+                $s_response = curl_exec($curl);
+                Log::info($s_response);
                 $results = json_decode($s_response);
-                foreach ($results->items as $item) {
-                    $concat_results  .= 'Title: ' . $item->title . "\n";
-                    $concat_results  .= 'Link: ' . $item->link . "\n";
-                    $concat_results  .= 'Snippet: ' . $item->snippet . "\n\n";
+                $concat_results="";
+                if(property_exists($results, 'knowledgeGraph')){
+                  $concat_results= "knowledgeGraph: " . json_encode($results->knowledgeGraph) . "\n";
                 }
+                if(property_exists($results, 'answerBox')){
+                  $concat_results= "answerBox : " . json_encode($results->answerBox) . "\n";
+                }
+                $concat_results .= "Organic:";
+                foreach ($results->organic as $item) {
+                    $concat_results  .= ' Title: ' . $item->title . "\n";
+                    $concat_results  .= ' Link: ' . $item->link . "\n";
+                    $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
+                }
+                Log::info("concat result");
                 Log::info($concat_results);
                 $messages[] = ['role' => 'function','name' => 'web_search', 'content' => $concat_results];
                 $response = OpenAI::chat()->create([
@@ -225,19 +249,44 @@ class ChatGptStoreController extends Controller
                     ]);
                 }else if($response->choices[0]->message->functionCall->name=='web_search'){
                     Log::info("Searching the web");
-                    $apiKey = 'AIzaSyCNKAVmTCelLTeAxPGq_ShbIGfdv6WRaV4';
-                    $cseID = '82a52554294294369';
+                    Log::info("Searching the web");
                     $query = $jsonData->query;
-                    $url = "https://www.googleapis.com/customsearch/v1?key=$apiKey&cx=$cseID&start=1&num=5&q=" .urlencode($query);
-        
-                    $s_response = file_get_contents($url);
-                    $concat_results = "";
+    
+                    $curl = curl_init();
+    
+                    curl_setopt_array($curl, array(
+                      CURLOPT_URL => 'https://google.serper.dev/search',
+                      CURLOPT_RETURNTRANSFER => true,
+                      CURLOPT_ENCODING => '',
+                      CURLOPT_MAXREDIRS => 5,
+                      CURLOPT_TIMEOUT => 0,
+                      CURLOPT_FOLLOWLOCATION => true,
+                      CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
+                      CURLOPT_CUSTOMREQUEST => 'POST',
+                      CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
+                      CURLOPT_HTTPHEADER => array(
+                        'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
+                        'Content-Type: application/json'
+                      ),
+                    ));
+                    
+                    $s_response = curl_exec($curl);
+                    Log::info($s_response);
                     $results = json_decode($s_response);
-                    foreach ($results->items as $item) {
-                        $concat_results  .= 'Title: ' . $item->title . "\n";
-                        $concat_results  .= 'Link: ' . $item->link . "\n";
-                        $concat_results  .= 'Snippet: ' . $item->snippet . "\n\n";
+                    $concat_results="";
+                    if(property_exists($results, 'knowledgeGraph')){
+                      $concat_results= "knowledgeGraph: " . json_encode($results->knowledgeGraph) . "\n";
                     }
+                    if(property_exists($results, 'answerBox')){
+                      $concat_results= "answerBox : " . json_encode($results->answerBox) . "\n";
+                    }
+                    $concat_results .= "Organic:";
+                    foreach ($results->organic as $item) {
+                        $concat_results  .= ' Title: ' . $item->title . "\n";
+                        $concat_results  .= ' Link: ' . $item->link . "\n";
+                        $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
+                    }
+                    Log::info("concat result");
                     Log::info($concat_results);
                     $messages[] = ['role' => 'function','name' => 'web_search', 'content' => $concat_results];
                     $response = OpenAI::chat()->create([
