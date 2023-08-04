@@ -52,6 +52,20 @@ class ChatGptStoreController extends Controller
                     ],
                       "required"=>  ["location"]
                     ]
+                ],
+                [
+                    "name" => "web_scraper",
+                    "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
+                    "parameters"=>  [
+                      "type"=>  "object",
+                      "properties"=>  [
+                        "url"=> [
+                          "type"=>  "string",
+                          "description"=> "The web site url"
+                    ]
+                    ],
+                      "required"=>  ["url"]
+                    ]
                 ]
                 ],
         ]);
