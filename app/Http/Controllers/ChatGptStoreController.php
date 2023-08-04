@@ -175,7 +175,93 @@ class ChatGptStoreController extends Controller
                         ],
                 ]);
 
-            }else if($response->choices[0]->message->functionCall->name=='web_scraper'){
+            }
+            else if($response->choices[0]->message->functionCall->name=='news_search'){
+              Log::info("Searching the news");
+              $query = $jsonData->query;
+
+              $curl = curl_init();
+
+              curl_setopt_array($curl, array(
+                CURLOPT_URL => 'https://google.serper.dev/news',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_ENCODING => '',
+                CURLOPT_MAXREDIRS => 10,
+                CURLOPT_TIMEOUT => 0,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
+                CURLOPT_CUSTOMREQUEST => 'POST',
+                CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
+                CURLOPT_HTTPHEADER => array(
+                  'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
+                  'Content-Type: application/json'
+                ),
+              ));
+              
+              $s_response = curl_exec($curl);
+              Log::info($s_response);
+              $results = json_decode($s_response);
+              $concat_results="";
+              foreach ($results->news as $item) {
+                  $concat_results  .= ' Title: ' . $item->title . "\n";
+                  $concat_results  .= ' Link: ' . $item->link . "\n";
+                  $concat_results  .= ' Date: ' . $item->date . "\n";
+                  $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
+              }
+              Log::info("concat result");
+              Log::info($concat_results);
+              $messages[] = ['role' => 'function','name' => 'news_search', 'content' => $concat_results];
+              $response = OpenAI::chat()->create([
+                  'model' => 'gpt-3.5-turbo-16k-0613',
+                  'messages' => $messages,
+                  "functions" => [
+                      [
+                          "name" => "web_search",
+                          "description"=>  "A search engine. useful for when you need to gather new information, latest, recent, trending and upcoming. Also useful If you don't have information about the information asked.",
+                          "parameters"=>  [
+                            "type"=>  "object",
+                            "properties"=>  [
+                              "query"=> [
+                                "type"=>  "string",
+                                "description"=> "The information needed to search"
+                          ]
+                          ],
+                            "required"=>  ["query"]
+                          ]
+                      ],
+                      [
+                        "name" => "news_search",
+                        "description"=>  "A news API. useful when you need news about certain place, time, events, person etc.",
+                        "parameters"=>  [
+                          "type"=>  "object",
+                          "properties"=>  [
+                            "query"=> [
+                              "type"=>  "string",
+                              "description"=> "The news about"
+                        ]
+                        ],
+                          "required"=>  ["query"]
+                        ]
+                    ],
+                      [
+                          "name" => "web_scraper",
+                          "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
+                          "parameters"=>  [
+                            "type"=>  "object",
+                            "properties"=>  [
+                              "url"=> [
+                                "type"=>  "string",
+                                "description"=> "The web site url"
+                          ]
+                          ],
+                            "required"=>  ["url"]
+                          ]
+                      ]
+                      ],
+              ]);
+
+          }
+            else if($response->choices[0]->message->functionCall->name=='web_scraper'){
                 Log::info("web scrapping");
                 $jsonData = json_decode($response->choices[0]->message->functionCall->arguments);
                 $scrape_result = scrapeWebsiteAndReturnText($jsonData->url);
@@ -407,7 +493,15 @@ function scrapeWebsiteAndReturnText($url) {
     // Load the HTML content from the URL
 
     Log::info("Scraping $url");
-    $html = file_get_contents($url);
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_PROXY, 'http://6fe25a60306000f1500cb95cc2b58d05b3fe24aa:@proxy.zenrows.com:8001');
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'GET');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+    $html = curl_exec($ch);
     Log::info("Parsing");
 
     // Suppress HTML errors (optional)
