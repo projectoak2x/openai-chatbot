@@ -15,482 +15,223 @@ class ChatGptStoreController extends Controller
      */
     public function __invoke(StoreChatRequest $request, string $id = null)
     {
-        $messages[] = ['role' => 'system', 'content' => 'The current UTC date and time now is ' . gmdate('Y-m-d H:i:s')];
+        $messages[] = ['role' => 'system', 'content' => 'The current UTC date and time now is ' . gmdate('Y-m-d H:i:s') . " . Using your web access and web scraping capabilities, please find the most recent and reliable sources online regarding the user questions. Please summarize your findings in a clear, concise manner for easy understanding."];
+
         if ($id) {
             $chat = Chat::findOrFail($id);
             $messages = $chat->context;
         }
+        $counter = 1;
         $messages[] = ['role' => 'user', 'content' => $request->input('promt')];
-        $response = OpenAI::chat()->create([
-            'model' => 'gpt-3.5-turbo-16k-0613',
-            'messages' => $messages,
-            "functions" => [
-                [
-                    "name" => "web_search",
-                    "description"=>  "A search engine. useful for when you need to gather new information, latest, trending and upcoming. Also useful If you don't have information about the information asked.",
-                    "parameters"=>  [
-                      "type"=>  "object",
-                      "properties"=>  [
-                        "query"=> [
-                          "type"=>  "string",
-                          "description"=> "The information needed to search"
-                    ]
-                    ],
-                      "required"=>  ["query"]
-                    ]
-                ],
-                [
-                    "name" => "get_current_weather",
-                    "description"=>  "Get the current weather in a given location.",
-                    "parameters"=>  [
-                      "type"=>  "object",
-                      "properties"=>  [
-                        "location"=> [
-                          "type"=>  "string",
-                          "description"=> "The location need weather info"
-                    ]
-                    ],
-                      "required"=>  ["location"]
-                    ]
-                ],
-                [
-                    "name" => "web_scraper",
-                    "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
-                    "parameters"=>  [
-                      "type"=>  "object",
-                      "properties"=>  [
-                        "url"=> [
-                          "type"=>  "string",
-                          "description"=> "The web site url"
-                    ]
-                    ],
-                      "required"=>  ["url"]
-                    ]
-                ]
-                ],
-        ]);
-        if($response->choices[0]->message->content==null){
+        $response = getResponse($messages);
+        while ($response->choices[0]->message->content==null&&$counter<=5){
             $jsonData = json_decode($response->choices[0]->message->functionCall->arguments);
-            Log::info($response->choices[0]->message->functionCall->arguments);
             if($response->choices[0]->message->functionCall->name=='get_current_weather'){
-                Log::info("Using weather api");
-                $location = $jsonData->location;
-                $url = "http://api.weatherapi.com/v1/current.json?key=0191ce76160f4b5b9ad31403230408&&aqi=no&q=" .urlencode($location);
-                $s_response = file_get_contents($url);
-                Log::info(json_encode($s_response));
-                $messages[] = ['role' => 'function','name' => 'get_current_weather', 'content' => $s_response];
-                $response = OpenAI::chat()->create([
-                    'model' => 'gpt-3.5-turbo-16k-0613',
-                    'messages' => $messages,
-                    "functions" => [
-                        [
-                            "name" => "get_current_weather",
-                            "description"=>  "Get the current weather in a given location. Returns Json data.",
-                            "parameters"=>  [
-                              "type"=>  "object",
-                              "properties"=>  [
-                                "location"=> [
-                                  "type"=>  "string",
-                                  "description"=> "The location need weather info"
-                            ]
-                            ],
-                              "required"=>  ["location"]
-                            ]
-                        ]
-                    ],
-                ]);
+                $messages[] = getWeather($jsonData);;
             }else if($response->choices[0]->message->functionCall->name=='web_search'){
-                Log::info("Searching the web");
-                $query = $jsonData->query;
-
-                $curl = curl_init();
-
-                curl_setopt_array($curl, array(
-                  CURLOPT_URL => 'https://google.serper.dev/search',
-                  CURLOPT_RETURNTRANSFER => true,
-                  CURLOPT_ENCODING => '',
-                  CURLOPT_MAXREDIRS => 10,
-                  CURLOPT_TIMEOUT => 0,
-                  CURLOPT_FOLLOWLOCATION => true,
-                  CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
-                  CURLOPT_CUSTOMREQUEST => 'POST',
-                  CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
-                  CURLOPT_HTTPHEADER => array(
-                    'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
-                    'Content-Type: application/json'
-                  ),
-                ));
-                
-                $s_response = curl_exec($curl);
-                Log::info($s_response);
-                $results = json_decode($s_response);
-                $concat_results="";
-                if(property_exists($results, 'knowledgeGraph')){
-                  $concat_results= "knowledgeGraph: " . json_encode($results->knowledgeGraph) . "\n";
-                }
-                if(property_exists($results, 'answerBox')){
-                  $concat_results= "answerBox : " . json_encode($results->answerBox) . "\n";
-                }
-                $concat_results .= "Organic:";
-                foreach ($results->organic as $item) {
-                    $concat_results  .= ' Title: ' . $item->title . "\n";
-                    $concat_results  .= ' Link: ' . $item->link . "\n";
-                    $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
-                }
-                Log::info("concat result");
-                Log::info($concat_results);
-                $messages[] = ['role' => 'function','name' => 'web_search', 'content' => $concat_results];
-                $response = OpenAI::chat()->create([
-                    'model' => 'gpt-3.5-turbo-16k-0613',
-                    'messages' => $messages,
-                    "functions" => [
-                        [
-                            "name" => "web_search",
-                            "description"=>  "A search engine. useful for when you need to gather new information, latest, recent, trending and upcoming. Also useful If you don't have information about the information asked.",
-                            "parameters"=>  [
-                              "type"=>  "object",
-                              "properties"=>  [
-                                "query"=> [
-                                  "type"=>  "string",
-                                  "description"=> "The information needed to search"
-                            ]
-                            ],
-                              "required"=>  ["query"]
-                            ]
-                        ],
-                        [
-                            "name" => "web_scraper",
-                            "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
-                            "parameters"=>  [
-                              "type"=>  "object",
-                              "properties"=>  [
-                                "url"=> [
-                                  "type"=>  "string",
-                                  "description"=> "The web site url"
-                            ]
-                            ],
-                              "required"=>  ["url"]
-                            ]
-                        ]
-                        ],
-                ]);
-
+                $messages[] = webSearch($jsonData);
             }
             else if($response->choices[0]->message->functionCall->name=='news_search'){
-              Log::info("Searching the news");
-              $query = $jsonData->query;
-
-              $curl = curl_init();
-
-              curl_setopt_array($curl, array(
-                CURLOPT_URL => 'https://google.serper.dev/news',
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_ENCODING => '',
-                CURLOPT_MAXREDIRS => 10,
-                CURLOPT_TIMEOUT => 0,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
-                CURLOPT_CUSTOMREQUEST => 'POST',
-                CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
-                CURLOPT_HTTPHEADER => array(
-                  'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
-                  'Content-Type: application/json'
-                ),
-              ));
-              
-              $s_response = curl_exec($curl);
-              Log::info($s_response);
-              $results = json_decode($s_response);
-              $concat_results="";
-              foreach ($results->news as $item) {
-                  $concat_results  .= ' Title: ' . $item->title . "\n";
-                  $concat_results  .= ' Link: ' . $item->link . "\n";
-                  $concat_results  .= ' Date: ' . $item->date . "\n";
-                  $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
-              }
-              Log::info("concat result");
-              Log::info($concat_results);
-              $messages[] = ['role' => 'function','name' => 'news_search', 'content' => $concat_results];
-              $response = OpenAI::chat()->create([
-                  'model' => 'gpt-3.5-turbo-16k-0613',
-                  'messages' => $messages,
-                  "functions" => [
-                      [
-                          "name" => "web_search",
-                          "description"=>  "A search engine. useful for when you need to gather new information, latest, recent, trending and upcoming. Also useful If you don't have information about the information asked.",
-                          "parameters"=>  [
-                            "type"=>  "object",
-                            "properties"=>  [
-                              "query"=> [
-                                "type"=>  "string",
-                                "description"=> "The information needed to search"
-                          ]
-                          ],
-                            "required"=>  ["query"]
-                          ]
-                      ],
-                      [
-                        "name" => "news_search",
-                        "description"=>  "A news API. useful when you need news about certain place, time, events, person etc.",
-                        "parameters"=>  [
-                          "type"=>  "object",
-                          "properties"=>  [
-                            "query"=> [
-                              "type"=>  "string",
-                              "description"=> "The news about"
-                        ]
-                        ],
-                          "required"=>  ["query"]
-                        ]
-                    ],
-                      [
-                          "name" => "web_scraper",
-                          "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
-                          "parameters"=>  [
-                            "type"=>  "object",
-                            "properties"=>  [
-                              "url"=> [
-                                "type"=>  "string",
-                                "description"=> "The web site url"
-                          ]
-                          ],
-                            "required"=>  ["url"]
-                          ]
-                      ]
-                      ],
-              ]);
-
-          }
+              $messages[] = getNews($jsonData);
+            }
             else if($response->choices[0]->message->functionCall->name=='web_scraper'){
-                Log::info("web scrapping");
-                $jsonData = json_decode($response->choices[0]->message->functionCall->arguments);
-                $scrape_result = scrapeWebsiteAndReturnText($jsonData->url);
-                Log::info($scrape_result);
-                $messages[] = ['role' => 'function','name' => 'web_scraper', 'content' => $scrape_result];
-                Log::info($response->choices[0]->message->functionCall->arguments);
-                $response = OpenAI::chat()->create([
-                    'model' => 'gpt-3.5-turbo-16k-0613',
-                    'messages' => $messages,
-                    "functions" => [
-                        [
-                            "name" => "web_search",
-                            "description"=>  "A search engine. useful for when you need to gather new information, latest, recent, trending and upcoming. Also useful If you don't have information about the information asked.",
-                            "parameters"=>  [
-                              "type"=>  "object",
-                              "properties"=>  [
-                                "query"=> [
-                                  "type"=>  "string",
-                                  "description"=> "The information needed to search"
-                            ]
-                            ],
-                              "required"=>  ["query"]
-                            ]
-                        ],
-                        [
-                            "name" => "web_scraper",
-                            "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
-                            "parameters"=>  [
-                              "type"=>  "object",
-                              "properties"=>  [
-                                "url"=> [
-                                  "type"=>  "string",
-                                  "description"=> "The web site url"
-                            ]
-                            ],
-                              "required"=>  ["url"]
-                            ]
-                        ]
-                        ],
-                ]);
+                $messages[] = webScrape($jsonData);
             }
-            if($response->choices[0]->message->content==null){
-                $jsonData = json_decode($response->choices[0]->message->functionCall->arguments);
-                Log::info($response->choices[0]->message->functionCall->arguments);
-                if($response->choices[0]->message->functionCall->name=='get_current_weather'){
-                    Log::info("Using weather api");
-                    $location = $jsonData->location;
-                    $url = "http://api.weatherapi.com/v1/current.json?key=0191ce76160f4b5b9ad31403230408&&aqi=no&q=" .urlencode($location);
-                    $s_response = file_get_contents($url);
-                    Log::info(json_encode($s_response));
-                    $messages[] = ['role' => 'function','name' => 'get_current_weather', 'content' => $s_response];
-                    $response = OpenAI::chat()->create([
-                        'model' => 'gpt-3.5-turbo-16k-0613',
-                        'messages' => $messages,
-                        "functions" => [
-                            [
-                                "name" => "get_current_weather",
-                                "description"=>  "Get the current weather in a given location. Returns Json data.",
-                                "parameters"=>  [
-                                  "type"=>  "object",
-                                  "properties"=>  [
-                                    "location"=> [
-                                      "type"=>  "string",
-                                      "description"=> "The location need weather info"
-                                ]
-                                ],
-                                  "required"=>  ["location"]
-                                ]
-                            ]
-                        ],
-                    ]);
-                }else if($response->choices[0]->message->functionCall->name=='web_search'){
-                    Log::info("Searching the web");
-                    Log::info("Searching the web");
-                    $query = $jsonData->query;
-    
-                    $curl = curl_init();
-    
-                    curl_setopt_array($curl, array(
-                      CURLOPT_URL => 'https://google.serper.dev/search',
-                      CURLOPT_RETURNTRANSFER => true,
-                      CURLOPT_ENCODING => '',
-                      CURLOPT_MAXREDIRS => 5,
-                      CURLOPT_TIMEOUT => 0,
-                      CURLOPT_FOLLOWLOCATION => true,
-                      CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
-                      CURLOPT_CUSTOMREQUEST => 'POST',
-                      CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
-                      CURLOPT_HTTPHEADER => array(
-                        'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
-                        'Content-Type: application/json'
-                      ),
-                    ));
-                    
-                    $s_response = curl_exec($curl);
-                    Log::info($s_response);
-                    $results = json_decode($s_response);
-                    $concat_results="";
-                    if(property_exists($results, 'knowledgeGraph')){
-                      $concat_results= "knowledgeGraph: " . json_encode($results->knowledgeGraph) . "\n";
-                    }
-                    if(property_exists($results, 'answerBox')){
-                      $concat_results= "answerBox : " . json_encode($results->answerBox) . "\n";
-                    }
-                    $concat_results .= "Organic:";
-                    foreach ($results->organic as $item) {
-                        $concat_results  .= ' Title: ' . $item->title . "\n";
-                        $concat_results  .= ' Link: ' . $item->link . "\n";
-                        $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
-                    }
-                    Log::info("concat result");
-                    Log::info($concat_results);
-                    $messages[] = ['role' => 'function','name' => 'web_search', 'content' => $concat_results];
-                    $response = OpenAI::chat()->create([
-                        'model' => 'gpt-3.5-turbo-16k-0613',
-                        'messages' => $messages,
-                        "functions" => [
-                            [
-                                "name" => "web_search",
-                                "description"=>  "A search engine. useful for when you need to gather new information, latest, recent, trending and upcoming. Also useful If you don't have information about the information asked.",
-                                "parameters"=>  [
-                                  "type"=>  "object",
-                                  "properties"=>  [
-                                    "query"=> [
-                                      "type"=>  "string",
-                                      "description"=> "The information needed to search"
-                                ]
-                                ],
-                                  "required"=>  ["query"]
-                                ]
-                            ]
-                            ],
-                            "functions" => [
-                                [
-                                    "name" => "web_scraper",
-                                    "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
-                                    "parameters"=>  [
-                                      "type"=>  "object",
-                                      "properties"=>  [
-                                        "url"=> [
-                                          "type"=>  "string",
-                                          "description"=> "The web site url"
-                                    ]
-                                    ],
-                                      "required"=>  ["url"]
-                                    ]
-                                ]
-                                ],
-                    ]);
-    
-                }else if($response->choices[0]->message->functionCall->name=='web_scraper'){
-                    Log::info("web scrapping");
-                    $jsonData = json_decode($response->choices[0]->message->functionCall->arguments);
-                    $scrape_result = scrapeWebsiteAndReturnText($jsonData->url);
-                    Log::info($scrape_result);
-                    $messages[] = ['role' => 'function','name' => 'web_scraper', 'content' => $scrape_result];
-                    Log::info($response->choices[0]->message->functionCall->arguments);
-                    $response = OpenAI::chat()->create([
-                        'model' => 'gpt-3.5-turbo-16k-0613',
-                        'messages' => $messages,
-                        "functions" => [
-                            [
-                                "name" => "web_search",
-                                "description"=>  "A search engine. useful for when you need to gather new information, latest, recent, trending and upcoming. Also useful If you don't have information about the information asked.",
-                                "parameters"=>  [
-                                  "type"=>  "object",
-                                  "properties"=>  [
-                                    "query"=> [
-                                      "type"=>  "string",
-                                      "description"=> "The information needed to search"
-                                ]
-                                ],
-                                  "required"=>  ["query"]
-                                ]
-                            ],
-                            [
-                                "name" => "web_scraper",
-                                "description"=>  "A web scraper. useful for when you need to gather more information to answer a question if snippet of web search is not enough. This return the website text data excluding the styles, scripts and structure from the link.",
-                                "parameters"=>  [
-                                  "type"=>  "object",
-                                  "properties"=>  [
-                                    "url"=> [
-                                      "type"=>  "string",
-                                      "description"=> "The web site url"
-                                ]
-                                ],
-                                  "required"=>  ["url"]
-                                ]
-                            ]
-                            ],
-                    ]);
-                }
-
-            }
-            $messages[] = ['role' => 'assistant', 'content' => $response->choices[0]->message->content??"I can't find it anywhere on my web results."];
-            $chat = Chat::updateOrCreate(
-                [
-                    'id' => $id,
-                    'user_id' => Auth::id()
-                ],
-                [
-                    'context' => $messages
-                ]
-            );
-        }else{
-            $messages[] = ['role' => 'assistant', 'content' => $response->choices[0]->message->content];
-            $chat = Chat::updateOrCreate(
-                [
-                    'id' => $id,
-                    'user_id' => Auth::id()
-                ],
-                [
-                    'context' => $messages
-                ]
-            );
+            $response = getResponse($messages);
         }
-
-
+        
+        $messages[] = ['role' => 'assistant', 'content' => $response->choices[0]->message->content??"I can't find it anywhere on my web results."];
+        $chat = Chat::updateOrCreate(
+            [
+                'id' => $id,
+                'user_id' => Auth::id()
+            ],
+            [
+                'context' => $messages
+            ]
+        );
 
         return redirect()->route('chat.show', [$chat->id]);
     }
 
 }
 
-function scrapeWebsiteAndReturnText($url) {
+function getResponse($messages){
+    $u_messages = $messages;
+    $a_user = ['role' => 'user', 'content' => 'when searching if you need more information to provide a more complete answer Please scrape into the urls. Do not scrape a url twice. If encounter problem scraping url, try other urls.'];
+    array_splice($u_messages, -1, 0, array($a_user));
+    return OpenAI::chat()->create([
+      'model' => 'gpt-3.5-turbo-16k-0613',
+      'messages' => $u_messages,
+      "functions" => [
+          [
+              "name" => "web_search",
+              "description"=>  "A search engine. useful for when you need to search the web. Please call the scrape function when searching for news.",
+              "parameters"=>  [
+                "type"=>  "object",
+                "properties"=>  [
+                  "query"=> [
+                    "type"=>  "string",
+                    "description"=> "The information needed to search"
+              ]
+              ],
+                "required"=>  ["query"]
+              ]
+          ],
+          [
+              "name" => "get_current_weather",
+              "description"=>  "Get the current weather in a given location.",
+              "parameters"=>  [
+                "type"=>  "object",
+                "properties"=>  [
+                  "location"=> [
+                    "type"=>  "string",
+                    "description"=> "The location need weather info"
+              ]
+              ],
+                "required"=>  ["location"]
+              ]
+          ],
+          // [
+          //     "name" => "news_search",
+          //     "description"=>  "News search engine.",
+          //     "parameters"=>  [
+          //       "type"=>  "object",
+          //       "properties"=>  [
+          //         "query"=> [
+          //           "type"=>  "string",
+          //           "description"=> "What news about"
+          //     ]
+          //     ],
+          //       "required"=>  ["query"]
+          //     ]
+          // ],
+          [
+              "name" => "web_scraper",
+              "description"=>  "A web scraper. useful for when you need to scrape websites for additional information. Most useful for when gathering information for news.",
+              "parameters"=>  [
+                "type"=>  "object",
+                "properties"=>  [
+                  "url"=> [
+                    "type"=>  "string",
+                    "description"=> "The web site url"
+              ]
+              ],
+                "required"=>  ["url"]
+              ]
+          ]
+          ],
+  ]);
+}
+
+function getWeather($jsonData){
+  Log::info("Using weather api");
+  $location = $jsonData->location;
+  $url = "http://api.weatherapi.com/v1/current.json?key=0191ce76160f4b5b9ad31403230408&&aqi=no&q=" .urlencode($location);
+  $s_response = file_get_contents($url);
+  Log::info(json_encode($s_response));
+  return ['role' => 'function','name' => 'get_current_weather', 'content' => $s_response];
+}
+
+function getNews($jsonData){
+  $query = $jsonData->query;
+
+  $curl = curl_init();
+
+  curl_setopt_array($curl, array(
+    CURLOPT_URL => 'https://google.serper.dev/news',
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_ENCODING => '',
+    CURLOPT_MAXREDIRS => 10,
+    CURLOPT_TIMEOUT => 0,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
+    CURLOPT_CUSTOMREQUEST => 'POST',
+    CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":10}',
+    CURLOPT_HTTPHEADER => array(
+      'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
+      'Content-Type: application/json'
+    ),
+  ));
+  
+  $s_response = curl_exec($curl);
+  Log::info($s_response);
+  $results = json_decode($s_response);
+  $concat_results="";
+  foreach ($results->news as $item) {
+      $concat_results  .= ' Title: ' . $item->title . "\n";
+      // $concat_results  .= ' Link: ' . $item->link . "\n";
+      $concat_results  .= ' Date: ' . $item->date . "\n";
+      $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
+  }
+  Log::info("concat result");
+  Log::info($concat_results);
+  return ['role' => 'function','name' => 'news_search', 'content' => $concat_results];
+}
+
+
+function webSearch($jsonData){
+  Log::info("Searching the web");
+  $query = $jsonData->query;
+
+  $curl = curl_init();
+
+  curl_setopt_array($curl, array(
+    CURLOPT_URL => 'https://google.serper.dev/search',
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_ENCODING => '',
+    CURLOPT_MAXREDIRS => 10,
+    CURLOPT_TIMEOUT => 0,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_HTTP_VERSION => 'CURL_HTTP_VERSION_1_1',
+    CURLOPT_CUSTOMREQUEST => 'POST',
+    CURLOPT_POSTFIELDS =>'{"q":"'.$query.'","num":5}',
+    CURLOPT_HTTPHEADER => array(
+      'X-API-KEY: 228c19b0a498a82d61554ff2801c28b4c92e0145',
+      'Content-Type: application/json'
+    ),
+  ));
+  
+  $s_response = curl_exec($curl);
+  Log::info($s_response);
+  $results = json_decode($s_response);
+  $concat_results="";
+  if(property_exists($results, 'knowledgeGraph')){
+    $concat_results= "knowledgeGraph: " . json_encode($results->knowledgeGraph) . "\n";
+  }
+  if(property_exists($results, 'answerBox')){
+    $concat_results= "answerBox : " . json_encode($results->answerBox) . "\n";
+  }
+  $concat_results .= "Organic:";
+  foreach ($results->organic as $item) {
+      $concat_results  .= ' Title: ' . $item->title . "\n";
+      $concat_results  .= ' Link: ' . $item->link . "\n";
+      $concat_results  .= ' Snippet: ' . $item->snippet . "\n\n";
+  }
+  Log::info("concat result");
+  Log::info($concat_results);
+  return ['role' => 'function','name' => 'web_search', 'content' => $concat_results];
+}
+
+
+function webScrape($jsonData) {
+    $url = $jsonData->url;
     // Create a new DOMDocument instance
     $dom = new \DOMDocument();
 
     // Load the HTML content from the URL
+
+    // $linkTags = $xpath->query('//a');
+    // foreach ($linkTags as $linkTag) {
+    //     $href = $linkTag->getAttribute('href');
+    //     $linkText = '[' . $linkTag->nodeValue . '](' . $href . ')';
+    
+    //     // create new text node for link
+    //     $newLinkNode = $dom->createTextNode($linkText);
+    
+    //     // replace the old 'a' node with new text node
+    //     $linkTag->parentNode->replaceChild($newLinkNode, $linkTag);
+    // }
 
     Log::info("Scraping $url");
     $ch = curl_init();
@@ -545,6 +286,8 @@ function scrapeWebsiteAndReturnText($url) {
         $filteredText .= $line . "\n";
     }
 
+    $parse_result = trim($textContent) . "\n\n" . "Scrape Source URL: $url";
+
     // Clean up whitespace and return the text content
-    return trim($textContent);
+    return ['role' => 'function','name' => 'web_scraper', 'content' => $parse_result];
 }
