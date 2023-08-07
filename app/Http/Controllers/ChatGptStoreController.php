@@ -39,15 +39,19 @@ class ChatGptStoreController extends Controller
             }
             $response = getResponse($messages);
         }
+
+        $filtered = array_filter($messages, function ($item) {
+          return !(isset($item['name']) && $item['name'] === 'web_scraper');
+        });
         
-        $messages[] = ['role' => 'assistant', 'content' => $response->choices[0]->message->content??"I can't find it anywhere on my web results."];
+        $filtered[] = ['role' => 'assistant', 'content' => $response->choices[0]->message->content??"I can't find it anywhere on my web results."];
         $chat = Chat::updateOrCreate(
             [
                 'id' => $id,
                 'user_id' => Auth::id()
             ],
             [
-                'context' => $messages
+                'context' => $filtered
             ]
         );
 
@@ -56,12 +60,22 @@ class ChatGptStoreController extends Controller
 
 }
 
+function getSummary($scrape_data){
+  Log::info("summarizing");
+  $response =  OpenAI::chat()->create([
+    'model' => 'gpt-4-0613',
+    'messages' => [['role' => 'system', 'content' => 'You are a scraper assistant that help retrieve data from a clean html data and returns all relavant information.'],['role' => 'user', 'content' => $scrape_data]]
+    ]);
+    Log::info($response->choices[0]->message->content);
+  return $response->choices[0]->message->content;
+}
+
 function getResponse($messages){
     $u_messages = $messages;
-    $a_user = ['role' => 'user', 'content' => 'when searching if you need more information to provide a more complete answer Please scrape into the urls. Do not scrape a url twice. If encounter problem scraping url, try other urls.'];
+    $a_user = ['role' => 'user', 'content' => 'when searching if you need more information to provide a more complete answer Please scrape into the urls. Scrape a url only once. If encounter problem scraping url, try other urls from the web search.'];
     array_splice($u_messages, -1, 0, array($a_user));
     return OpenAI::chat()->create([
-      'model' => 'gpt-3.5-turbo-16k-0613',
+      'model' => 'gpt-4-0613',
       'messages' => $u_messages,
       "functions" => [
           [
@@ -221,18 +235,6 @@ function webScrape($jsonData) {
 
     // Load the HTML content from the URL
 
-    // $linkTags = $xpath->query('//a');
-    // foreach ($linkTags as $linkTag) {
-    //     $href = $linkTag->getAttribute('href');
-    //     $linkText = '[' . $linkTag->nodeValue . '](' . $href . ')';
-    
-    //     // create new text node for link
-    //     $newLinkNode = $dom->createTextNode($linkText);
-    
-    //     // replace the old 'a' node with new text node
-    //     $linkTag->parentNode->replaceChild($newLinkNode, $linkTag);
-    // }
-
     Log::info("Scraping $url");
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
@@ -253,6 +255,18 @@ function webScrape($jsonData) {
 
     // Create a DOMXPath object to navigate the DOMDocument
     $xpath = new \DOMXPath($dom);
+
+    $linkTags = $xpath->query('//a');
+    foreach ($linkTags as $linkTag) {
+        $href = $linkTag->getAttribute('href');
+        $linkText = '[' . $linkTag->nodeValue . '](' . $href . ')';
+    
+        // create new text node for link
+        $newLinkNode = $dom->createTextNode($linkText);
+    
+        // replace the old 'a' node with new text node
+        $linkTag->parentNode->replaceChild($newLinkNode, $linkTag);
+    }
 
     // Remove all script tags from the DOMDocument
     $scriptTags = $xpath->query('//script');
@@ -286,7 +300,11 @@ function webScrape($jsonData) {
         $filteredText .= $line . "\n";
     }
 
+    // $summary = getSummary(trim($textContent));
+
     $parse_result = trim($textContent) . "\n\n" . "Scrape Source URL: $url";
+
+    Log::info($parse_result);
 
     // Clean up whitespace and return the text content
     return ['role' => 'function','name' => 'web_scraper', 'content' => $parse_result];
