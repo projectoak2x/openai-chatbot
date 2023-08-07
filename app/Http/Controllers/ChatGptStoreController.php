@@ -64,7 +64,7 @@ function getSummary($scrape_data){
   Log::info("summarizing");
   $response =  OpenAI::chat()->create([
     'model' => 'gpt-4-0613',
-    'messages' => [['role' => 'system', 'content' => 'You are a scraper assistant that help retrieve data from a clean html data and returns all relavant information.'],['role' => 'user', 'content' => $scrape_data]]
+    'messages' => [['role' => 'system', 'content' => 'You are a scraper assistant that help retrieve data from a clean html data and returns all relavant information including link to.'],['role' => 'user', 'content' => $scrape_data]]
     ]);
     Log::info($response->choices[0]->message->content);
   return $response->choices[0]->message->content;
@@ -256,17 +256,17 @@ function webScrape($jsonData) {
     // Create a DOMXPath object to navigate the DOMDocument
     $xpath = new \DOMXPath($dom);
 
-    $linkTags = $xpath->query('//a');
-    foreach ($linkTags as $linkTag) {
-        $href = $linkTag->getAttribute('href');
-        $linkText = '[' . $linkTag->nodeValue . '](' . $href . ')';
+    // $linkTags = $xpath->query('//a');
+    // foreach ($linkTags as $linkTag) {
+    //     $href = $linkTag->getAttribute('href');
+    //     $linkText = '[' . $linkTag->nodeValue . '](' . $href . ')';
     
-        // create new text node for link
-        $newLinkNode = $dom->createTextNode($linkText);
+    //     // create new text node for link
+    //     $newLinkNode = $dom->createTextNode($linkText);
     
-        // replace the old 'a' node with new text node
-        $linkTag->parentNode->replaceChild($newLinkNode, $linkTag);
-    }
+    //     // replace the old 'a' node with new text node
+    //     $linkTag->parentNode->replaceChild($newLinkNode, $linkTag);
+    // }
 
     // Remove all script tags from the DOMDocument
     $scriptTags = $xpath->query('//script');
